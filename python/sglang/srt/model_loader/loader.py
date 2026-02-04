@@ -2022,6 +2022,7 @@ class RemoteInstanceModelLoader(BaseModelLoader):
                 f"load format {load_config.load_format}"
             )
         self.remote_instance_transfer_engine_weight_info = None
+        self.mooncake_store_client = None
 
     def download_model(self, model_config: ModelConfig) -> None:
         raise NotImplementedError
@@ -2090,6 +2091,19 @@ class RemoteInstanceModelLoader(BaseModelLoader):
             if not success:
                 raise RuntimeError(
                     "Failed to load weights from remote instance via transfer engine."
+                )
+        elif (
+            load_config.remote_instance_weight_loader_backend
+            == "MooncakeStore"
+        ):
+            if self.mooncake_store_client is None:
+                self.mooncake_store_client = self.remote_instance_init_mooncake_store_client
+
+            logger.info("Starting load model from remote mooncake store.")
+            success = self.load_model_from_mooncake_store(model, self.mooncake_store_client, load_config.tp_rank)
+            if not success:
+                raise RuntimeError(
+                    "Failed to load weights from remote instance via mooncake store."
                 )
         else:
             raise ValueError("Invalid remote instance weight loader backend.")
@@ -2203,6 +2217,56 @@ class RemoteInstanceModelLoader(BaseModelLoader):
             model.post_load_weights()
 
         return True
+
+
+    def load_model_from_mooncake_store(
+        self, model, mooncake_store, tp_rank
+    ) -> bool:
+        client_ptr_list = []
+        client_len_list = []
+        for name, tensor in model.named_parameters():
+            client_ptr = tensor.data_ptr()
+            client_len = tensor.numel() * tensor.element_size()
+
+            ret_code = mooncake_store.batch_get_into([name], [client_ptr], [client_len])
+            if len(ret_code) != 1:
+                logger.warning(f"failed to get tensor {name} from mooncake store")
+            # client_ptr_list.append(client_ptr)
+            # client_len_list.append(client_len)
+
+        return True
+
+    def remote_instance_init_mooncake_store_client(self):
+        try:
+            from mooncake.store import MooncakeDistributedStore
+        except ImportError as e:
+            raise ImportError(
+                "Please install mooncake by following the instructions at "
+                "https://kvcache-ai.github.io/Mooncake/getting_started/build.html"
+                "to run SGLang with MooncakeConnector."
+            ) from e
+
+        store = MooncakeDistributedStore()
+        from sglang.srt.mem_cache.storage.mooncake_store.mooncake_store import MooncakeStoreConfig
+        config = MooncakeStoreConfig.load_from_env()
+
+        per_tp_global_segment_size = config.global_segment_size
+        local_buffer_size = 16 * 1024 * 1024
+        # temporarily set to empty
+        device_name = ""
+
+        store.setup(
+            config.local_hostname,
+            config.metadata_server,
+            per_tp_global_segment_size,
+            local_buffer_size,  # Zero copy interface does not need local buffer
+            config.protocol,
+            device_name,
+            config.master_server_address,
+        )
+
+        return store
+
 
 
 class RemoteModelLoader(BaseModelLoader):

@@ -954,6 +954,10 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             f"avail mem={after_avail_memory:.2f} GB, "
             f"mem usage={self.weight_load_mem_usage:.2f} GB."
         )
+
+        if os.getenv("LOAD_WEIGHTS_FROM_MOONCAKE_STORE", "false") == "true":
+            self.warmup_mooncake_store()
+
         if self.server_args.debug_tensor_dump_output_folder is not None:
             register_forward_hook_for_model(
                 self.model,
@@ -989,6 +993,49 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 raise ValueError(
                     f"TP rank {self.tp_rank} could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node."
                 ) from None
+
+    def warmup_mooncake_store(self):
+        try:
+            from mooncake.store import MooncakeDistributedStore
+        except ImportError as e:
+            raise ImportError(
+                "Please install mooncake by following the instructions at "
+                "https://kvcache-ai.github.io/Mooncake/getting_started/build.html"
+                "to run SGLang with MooncakeConnector."
+            ) from e
+
+        # set up mooncake store
+        logger.info(f"Start warming up mooncake store with loaded model weights")
+        store = MooncakeDistributedStore()
+        from sglang.srt.mem_cache.storage.mooncake_store.mooncake_store import MooncakeStoreConfig
+        config = MooncakeStoreConfig.load_from_env()
+        logger.info(f"Setting up mooncake store with loaded model configuration: {config}")
+        default_local_buffer_size = 16 * 1024 * 1024
+        per_tp_global_segment_size = config.global_segment_size
+        device_name = ""
+        store.setup(
+            config.local_hostname,
+            config.metadata_server,
+            per_tp_global_segment_size,
+            default_local_buffer_size,  # Zero copy interface does not need local buffer
+            config.protocol,
+            device_name,
+            config.master_server_address,
+        )
+        logger.info(f"Successfully set up mooncake store")
+
+        # warmup mooncake store
+        if self.model is None:
+            logger.info(f"warmup should be called after self.load_model()")
+            return
+
+        for key, tensor in self.model.named_parameters():
+            tensor_size = tensor.untyped_storage().nbytes()
+            tensor_ptr = tensor.data_ptr()
+            if store.is_exist(key) != 1:
+                ret_code = store.batch_put_from([key], [tensor_ptr], [tensor_size])
+                if len(ret_code) != 1 or ret_code[0] != 0:
+                    logger.warning(f"fail to put {key} to mooncake store")
 
     def update_expert_location(
         self,
