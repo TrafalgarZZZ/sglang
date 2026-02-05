@@ -17,6 +17,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, suppress
+from pyexpat import model
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -2222,6 +2223,7 @@ class RemoteInstanceModelLoader(BaseModelLoader):
     def load_model_from_mooncake_store(
         self, model, mooncake_store, tp_rank
     ) -> bool:
+        client_tensor_name_list = []
         client_ptr_list = []
         client_len_list = []
         for name, tensor in model.named_parameters():
@@ -2231,13 +2233,22 @@ class RemoteInstanceModelLoader(BaseModelLoader):
             client_len = tensor.numel() * tensor.element_size()
 
             tensor_name = f"{name}_tpsize{tp_size}_tp{tp_rank}"
-            ret_code = mooncake_store.batch_get_into([tensor_name], [client_ptr], [client_len])
-            if len(ret_code) != 1:
-                logger.warning(f"failed to get tensor {tensor_name} from mooncake store")
-            # client_ptr_list.append(client_ptr)
-            # client_len_list.append(client_len)
+            client_tensor_name_list.append(tensor_name)
+            client_ptr_list.append(client_ptr)
+            client_len_list.append(client_len)
 
-        return True
+        ret_code_list = mooncake_store.batch_get_into(client_tensor_name_list, client_ptr_list, client_len_list)
+        if len(ret_code_list) != len(client_len_list):
+            logger.error(f"Unexpected length, got ret_code_list length: {len(ret_code_list)}, expected {len(client_len_list)}.")
+            return False
+
+        all_loaded = True
+        for tensor_name, got_len, expecte_len in zip(client_tensor_name_list, client_len_list, ret_code_list):
+            if got_len != expecte_len:
+                logger.warning(f"fail to load tensor {tensor_name} because of mismatched length.")
+                all_loaded = False
+
+        return all_loaded
 
     def remote_instance_init_mooncake_store_client(self):
         try:
