@@ -2094,10 +2094,10 @@ class RemoteInstanceModelLoader(BaseModelLoader):
                 )
         elif (
             load_config.remote_instance_weight_loader_backend
-            == "MooncakeStore"
+            == "mooncake_store"
         ):
             if self.mooncake_store_client is None:
-                self.mooncake_store_client = self.remote_instance_init_mooncake_store_client
+                self.mooncake_store_client = self.remote_instance_init_mooncake_store_client()
 
             logger.info("Starting load model from remote mooncake store.")
             success = self.load_model_from_mooncake_store(model, self.mooncake_store_client, load_config.tp_rank)
@@ -2226,11 +2226,14 @@ class RemoteInstanceModelLoader(BaseModelLoader):
         client_len_list = []
         for name, tensor in model.named_parameters():
             client_ptr = tensor.data_ptr()
+            tp_size = get_tensor_model_parallel_world_size()
+            tp_rank = 0 if tp_rank is None else tp_rank
             client_len = tensor.numel() * tensor.element_size()
 
-            ret_code = mooncake_store.batch_get_into([name], [client_ptr], [client_len])
+            tensor_name = f"{name}_tpsize{tp_size}_tp{tp_rank}"
+            ret_code = mooncake_store.batch_get_into([tensor_name], [client_ptr], [client_len])
             if len(ret_code) != 1:
-                logger.warning(f"failed to get tensor {name} from mooncake store")
+                logger.warning(f"failed to get tensor {tensor_name} from mooncake store")
             # client_ptr_list.append(client_ptr)
             # client_len_list.append(client_len)
 

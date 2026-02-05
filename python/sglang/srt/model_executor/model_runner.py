@@ -955,8 +955,8 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             f"mem usage={self.weight_load_mem_usage:.2f} GB."
         )
 
-        if os.getenv("LOAD_WEIGHTS_FROM_MOONCAKE_STORE", "false") == "true":
-            self.warmup_mooncake_store()
+        if os.getenv("WARMUP_WEIGHTS_TO_MOONCAKE_STORE", "false") == "true":
+            self.warmup_mooncake_store(self.tp_rank, self.tp_size)
 
         if self.server_args.debug_tensor_dump_output_folder is not None:
             register_forward_hook_for_model(
@@ -994,7 +994,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                     f"TP rank {self.tp_rank} could finish the model loading, but there are other ranks that didn't finish loading. It is likely due to unexpected failures (e.g., OOM) or a slow node."
                 ) from None
 
-    def warmup_mooncake_store(self):
+    def warmup_mooncake_store(self, tp_rank: int, tp_size: int):
         try:
             from mooncake.store import MooncakeDistributedStore
         except ImportError as e:
@@ -1030,12 +1030,13 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             return
 
         for key, tensor in self.model.named_parameters():
+            tensor_key = f"{key}_tpsize{tp_size}_tp{tp_rank}"
             tensor_size = tensor.untyped_storage().nbytes()
             tensor_ptr = tensor.data_ptr()
-            if store.is_exist(key) != 1:
-                ret_code = store.batch_put_from([key], [tensor_ptr], [tensor_size])
+            if store.is_exist(tensor_key) != 1:
+                ret_code = store.batch_put_from([tensor_key], [tensor_ptr], [tensor_size])
                 if len(ret_code) != 1 or ret_code[0] != 0:
-                    logger.warning(f"fail to put {key} to mooncake store")
+                    logger.warning(f"fail to put {tensor_key} to mooncake store")
 
     def update_expert_location(
         self,

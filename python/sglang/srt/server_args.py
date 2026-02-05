@@ -621,7 +621,7 @@ class ServerArgs:
     remote_instance_weight_loader_seed_instance_ip: Optional[str] = None
     remote_instance_weight_loader_seed_instance_service_port: Optional[int] = None
     remote_instance_weight_loader_send_weights_group_ports: Optional[List[int]] = None
-    remote_instance_weight_loader_backend: Literal["transfer_engine", "nccl"] = "nccl"
+    remote_instance_weight_loader_backend: Literal["transfer_engine", "nccl", "mooncake_store"] = "nccl"
     remote_instance_weight_loader_start_seed_via_transfer_engine: bool = False
 
     # For PD-Multiplexing
@@ -2141,7 +2141,9 @@ class ServerArgs:
             self.custom_weight_loader = []
 
         if self.load_format == "remote_instance":
-            if (
+            if self.remote_instance_weight_loader_backend == "mooncake_store":
+                logger.info("Using remote instance weight loader backend: mooncake_store")
+            elif (
                 self.remote_instance_weight_loader_seed_instance_ip is None
                 or self.remote_instance_weight_loader_seed_instance_service_port is None
             ):
@@ -4374,7 +4376,7 @@ class ServerArgs:
         parser.add_argument(
             "--remote-instance-weight-loader-backend",
             type=str,
-            choices=["transfer_engine", "nccl"],
+            choices=["transfer_engine", "nccl", "mooncake_store"],
             default=ServerArgs.remote_instance_weight_loader_backend,
             help="The backend for loading weights from remote instance. Can be 'transfer_engine' or 'nccl'. Default is 'nccl'.",
         )
