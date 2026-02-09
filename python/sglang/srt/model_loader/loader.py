@@ -35,6 +35,7 @@ import huggingface_hub
 import numpy as np
 import torch
 
+from sglang.srt.mem_cache.storage.mooncake_store import mooncake_store
 from sglang.srt.model_loader.remote_instance_weight_loader_utils import (
     RemoteInstanceWeightLoaderBackend,
     get_remote_instance_transfer_engine_info_per_rank,
@@ -2247,6 +2248,10 @@ class RemoteInstanceModelLoader(BaseModelLoader):
             if got_len != expecte_len:
                 logger.warning(f"fail to load tensor {tensor_name} because of mismatched length.")
                 all_loaded = False
+
+        if all_loaded:
+            if hasattr(model, "post_load_weights"):
+                model.post_load_weights()
 
         return all_loaded
 
