@@ -2305,17 +2305,17 @@ class RemoteModelLoader(BaseModelLoader):
                 r_key = f"{model_name}/keys/rank_{rank}/{key}"
                 client.set(r_key, tensor)
 
-            for root, _, files in os.walk(model_path):
-                for file_name in files:
-                    # ignore hidden files
-                    if file_name.startswith("."):
-                        continue
-                    if os.path.splitext(file_name)[1] in (".json", ".py"):
-                        file_path = os.path.join(root, file_name)
-                        with open(file_path, encoding="utf-8") as file:
-                            file_content = file.read()
-                            f_key = f"{model_name}/files/{file_name}"
-                            client.setstr(f_key, file_content)
+            # for root, _, files in os.walk(model_path):
+            #     for file_name in files:
+            #         # ignore hidden files
+            #         if file_name.startswith("."):
+            #             continue
+            #         if os.path.splitext(file_name)[1] in (".json", ".py"):
+            #             file_path = os.path.join(root, file_name)
+            #             with open(file_path, encoding="utf-8") as file:
+            #                 file_content = file.read()
+            #                 f_key = f"{model_name}/files/{file_name}"
+            #                 client.setstr(f_key, file_content
 
     def _load_model_from_remote_kv(
         self, model: nn.Module, model_config: ModelConfig, client
