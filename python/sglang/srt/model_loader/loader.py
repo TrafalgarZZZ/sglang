@@ -2301,21 +2301,35 @@ class RemoteModelLoader(BaseModelLoader):
             model_name = parse_model_name(url)
             rank = get_tensor_model_parallel_rank()
             state_dict = ShardedStateLoader._filter_subtensors(model.state_dict())
+            
+            batchify_r_keys = []
+            batchify_tensors = []
             for key, tensor in state_dict.items():
                 r_key = f"{model_name}/keys/rank_{rank}/{key}"
-                client.set(r_key, tensor)
+                if hasattr(client, "batch_put_from"):
+                    batchify_r_keys.append(r_key)
+                    batchify_tensors.append(tensor)
+                    if len(batchify_r_keys) == 1024:
+                        client.batch_put_from(batchify_r_keys, batchify_tensors)
+                        batchify_r_keys = []
+                        batchify_tensors = []
+                else:
+                    client.set(r_key, tensor)
+            if batchify_r_keys:
+                client.batch_put_from(batchify_r_keys, batchify_tensors)
 
-            for root, _, files in os.walk(model_path):
-                for file_name in files:
-                    # ignore hidden files
-                    if file_name.startswith("."):
-                        continue
-                    if os.path.splitext(file_name)[1] in (".json", ".py"):
-                        file_path = os.path.join(root, file_name)
-                        with open(file_path, encoding="utf-8") as file:
-                            file_content = file.read()
-                            f_key = f"{model_name}/files/{file_name}"
-                            client.setstr(f_key, file_content)
+            if rank == 0:
+                for root, _, files in os.walk(model_path):
+                    for file_name in files:
+                        # ignore hidden files
+                        if file_name.startswith("."):
+                            continue
+                        if os.path.splitext(file_name)[1] in (".json", ".py"):
+                            file_path = os.path.join(root, file_name)
+                            with open(file_path, encoding="utf-8") as file:
+                                file_content = file.read()
+                                f_key = f"{model_name}/files/{file_name}"
+                                client.setstr(f_key, file_content)
 
     def _load_model_from_remote_kv(
         self, model: nn.Module, model_config: ModelConfig, client
@@ -2327,10 +2341,20 @@ class RemoteModelLoader(BaseModelLoader):
                 
         rank = get_tensor_model_parallel_rank()
         state_dict = ShardedStateLoader._filter_subtensors(model.state_dict())
-        if hasattr(client, "get_into"):
+        batchify_r_keys = []
+        batchify_tensors = []
+        if hasattr(client, "batch_get_into"):
             for key, tensor in state_dict.items():
                 r_key = f"keys/rank_{rank}/{key}"
-                client.get_into(r_key, tensor)
+                batchify_r_keys.append(r_key)
+                batchify_tensors.append(tensor)
+                if len(batchify_r_keys) == 256:
+                    client.batch_get_into(batchify_r_keys, batchify_tensors)
+                    batchify_r_keys = []
+                    batchify_tensors = []
+        
+        if batchify_r_keys:
+            client.batch_get_into(batchify_r_keys, batchify_tensors)
 
         # weights_iterator = self._get_weights_iterator_kv(client)
         # for key, tensor in weights_iterator:

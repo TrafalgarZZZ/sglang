@@ -65,7 +65,7 @@ class MooncakeStoreConnector(BaseKVConnector):
 
         self._rep_config = ReplicateConfig()
         self._rep_config.replica_num = 1
-        self._rep_config.preferred_segments = ["localhost:13949", "localhost:12785"]
+        self._rep_config.preferred_segments = ["localhost:14248"]
 
         logger.info("MooncakeStoreConnector initialized successfully.")
 
@@ -114,6 +114,20 @@ class MooncakeStoreConnector(BaseKVConnector):
     # BaseKVConnector interface
     # ------------------------------------------------------------------
 
+    def batch_get_into(self, keys: List[str], tensors: List[torch.Tensor]) -> None:
+        tensor_ptrs = [tensor.data_ptr() for tensor in tensors]
+        tensor_sizes = [tensor.untyped_storage().nbytes() for tensor in tensors]
+
+        for tensor in tensors:
+            ret_code = self.store.register_buffer(tensor.data_ptr(), tensor.untyped_storage().nbytes())
+            if ret_code:
+                raise RuntimeError(
+                    f"Failed to register buffer to Mooncake Store, error code: {ret_code}"
+                )
+
+        results = self.store.batch_get_into([f"{self.model_name}/{key}" for key in keys], tensor_ptrs, tensor_sizes)
+        print(results)
+
     def get_into(self, key: str, tensor: torch.Tensor) -> None:
         tensor_size = tensor.untyped_storage().nbytes()
         tensor_ptr = tensor.data_ptr()
@@ -157,6 +171,20 @@ class MooncakeStoreConnector(BaseKVConnector):
         # raise RuntimeError(
             # f"Failed to put key '{key}' into Mooncake store, error code: {ret_code}"
         # )
+    
+    def batch_put_from(self, keys: List[str], tensors: List[torch.Tensor]) -> None:
+        tensor_ptrs = [tensor.data_ptr() for tensor in tensors]
+        tensor_sizes = [tensor.untyped_storage().nbytes() for tensor in tensors]
+
+        for tensor in tensors:
+            ret_code = self.store.register_buffer(tensor.data_ptr(), tensor.untyped_storage().nbytes())
+            if ret_code:
+                raise RuntimeError(
+                    f"Failed to register buffer to Mooncake Store, error code: {ret_code}"
+                )
+        
+        results = self.store.batch_put_from(keys, tensor_ptrs, tensor_sizes, self._rep_config)
+        print(results)
 
     def setstr(self, key: str, obj: str) -> None:
         ret_code = self.store.put(key, obj.encode("utf-8"), self._rep_config)
