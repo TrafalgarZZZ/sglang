@@ -65,6 +65,7 @@ class MooncakeStoreConnector(BaseKVConnector):
 
         self._rep_config = ReplicateConfig()
         self._rep_config.replica_num = 1
+        self._rep_config.preferred_segments = ["localhost:13949", "localhost:12785"]
 
         logger.info("MooncakeStoreConnector initialized successfully.")
 
@@ -113,6 +114,18 @@ class MooncakeStoreConnector(BaseKVConnector):
     # BaseKVConnector interface
     # ------------------------------------------------------------------
 
+    def get_into(self, key: str, tensor: torch.Tensor) -> None:
+        tensor_size = tensor.untyped_storage().nbytes()
+        tensor_ptr = tensor.data_ptr()
+
+        ret_code = self.store.register_buffer(tensor_ptr, tensor_size)
+        if ret_code:
+            raise RuntimeError(
+                f"Failed to register buffer to Mooncake Store, error code: {ret_code}"
+            )
+
+        self.store.batch_get_into([f"{self.model_name}/{key}"], [tensor_ptr], [tensor_size])
+
     def get(self, key: str) -> Optional[torch.Tensor]:
         data = self.store.get(key)
         if data is None:
@@ -146,7 +159,7 @@ class MooncakeStoreConnector(BaseKVConnector):
         # )
 
     def setstr(self, key: str, obj: str) -> None:
-        ret_code = self.store.put(key, obj.encode("utf-8"))
+        ret_code = self.store.put(key, obj.encode("utf-8"), self._rep_config)
         if ret_code != 0:
             raise RuntimeError(
                 f"Failed to put string key '{key}' into Mooncake store, error code: {ret_code}"
@@ -158,14 +171,15 @@ class MooncakeStoreConnector(BaseKVConnector):
         a sentinel index key that stores a newline-separated list of keys
         written under that prefix.
         """
-        index_key = f"__index__{prefix}"
-        data = self.store.get(index_key)
-        if data is None:
-            return []
-        content = data.decode("utf-8").strip()
-        if not content:
-            return []
-        return content.split("\n")
+        # index_key = f"__index__{prefix}"
+        # data = self.store.get(index_key)
+        # if data is None:
+        #     return []
+        # content = data.decode("utf-8").strip()
+        # if not content:
+        #     return []
+        # return content.split("\n")
+        return [f"{prefix}{key}" for key in ["config.json", "vocab.json", "tokenizer_config.json", "model.safetensors.index.json", "generation_config.json", "tokenizer.json"]]
 
     def _register_key_in_index(self, key: str, prefix: str) -> None:
         """Maintain a simple index for list() support."""

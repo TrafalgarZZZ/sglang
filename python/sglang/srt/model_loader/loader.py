@@ -2305,17 +2305,17 @@ class RemoteModelLoader(BaseModelLoader):
                 r_key = f"{model_name}/keys/rank_{rank}/{key}"
                 client.set(r_key, tensor)
 
-            # for root, _, files in os.walk(model_path):
-            #     for file_name in files:
-            #         # ignore hidden files
-            #         if file_name.startswith("."):
-            #             continue
-            #         if os.path.splitext(file_name)[1] in (".json", ".py"):
-            #             file_path = os.path.join(root, file_name)
-            #             with open(file_path, encoding="utf-8") as file:
-            #                 file_content = file.read()
-            #                 f_key = f"{model_name}/files/{file_name}"
-            #                 client.setstr(f_key, file_content
+            for root, _, files in os.walk(model_path):
+                for file_name in files:
+                    # ignore hidden files
+                    if file_name.startswith("."):
+                        continue
+                    if os.path.splitext(file_name)[1] in (".json", ".py"):
+                        file_path = os.path.join(root, file_name)
+                        with open(file_path, encoding="utf-8") as file:
+                            file_content = file.read()
+                            f_key = f"{model_name}/files/{file_name}"
+                            client.setstr(f_key, file_content)
 
     def _load_model_from_remote_kv(
         self, model: nn.Module, model_config: ModelConfig, client
@@ -2324,28 +2324,35 @@ class RemoteModelLoader(BaseModelLoader):
             quant_method = getattr(module, "quant_method", None)
             if quant_method is not None:
                 quant_method.process_weights_after_loading(module)
-        weights_iterator = self._get_weights_iterator_kv(client)
+                
+        rank = get_tensor_model_parallel_rank()
         state_dict = ShardedStateLoader._filter_subtensors(model.state_dict())
-        for key, tensor in weights_iterator:
-            # If loading with LoRA enabled, additional padding may
-            # be added to certain parameters. We only load into a
-            # narrowed view of the parameter data.
-            param_data = state_dict[key].data
-            param_shape = state_dict[key].shape
-            for dim, size in enumerate(tensor.shape):
-                if size < param_shape[dim]:
-                    param_data = param_data.narrow(dim, 0, size)
-            if tensor.shape != param_shape:
-                logger.warning(
-                    "loading tensor of shape %s into " "parameter '%s' of shape %s",
-                    tensor.shape,
-                    key,
-                    param_shape,
-                )
-            param_data.copy_(tensor)
-            state_dict.pop(key)
-        if state_dict:
-            raise ValueError(f"Missing keys {tuple(state_dict)} in loaded state!")
+        if hasattr(client, "get_into"):
+            for key, tensor in state_dict.items():
+                r_key = f"keys/rank_{rank}/{key}"
+                client.get_into(r_key, tensor)
+
+        # weights_iterator = self._get_weights_iterator_kv(client)
+        # for key, tensor in weights_iterator:
+        #     # If loading with LoRA enabled, additional padding may
+        #     # be added to certain parameters. We only load into a
+        #     # narrowed view of the parameter data.
+        #     param_data = state_dict[key].data
+        #     param_shape = state_dict[key].shape
+        #     for dim, size in enumerate(tensor.shape):
+        #         if size < param_shape[dim]:
+        #             param_data = param_data.narrow(dim, 0, size)
+        #     if tensor.shape != param_shape:
+        #         logger.warning(
+        #             "loading tensor of shape %s into " "parameter '%s' of shape %s",
+        #             tensor.shape,
+        #             key,
+        #             param_shape,
+        #         )
+        #     param_data.copy_(tensor)
+        #     state_dict.pop(key)
+        # if state_dict:
+        #     raise ValueError(f"Missing keys {tuple(state_dict)} in loaded state!")
 
         post_load_weights(model, model_config)
 
