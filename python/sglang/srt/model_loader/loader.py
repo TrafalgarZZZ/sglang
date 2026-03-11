@@ -2309,7 +2309,7 @@ class RemoteModelLoader(BaseModelLoader):
                 if hasattr(client, "batch_put_from"):
                     batchify_r_keys.append(r_key)
                     batchify_tensors.append(tensor)
-                    if len(batchify_r_keys) == 1024:
+                    if len(batchify_r_keys) == 256:
                         client.batch_put_from(batchify_r_keys, batchify_tensors)
                         batchify_r_keys = []
                         batchify_tensors = []
