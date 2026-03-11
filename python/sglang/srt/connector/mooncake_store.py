@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 from typing import Generator, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -65,7 +66,10 @@ class MooncakeStoreConnector(BaseKVConnector):
 
         self._rep_config = ReplicateConfig()
         self._rep_config.replica_num = 1
-        self._rep_config.preferred_segments = ["localhost:14248"]
+
+        preferred_segment = os.getenv("MOONCAKE_CONNECTOR_PREFERRED_SEGMENTS")
+        if preferred_segment is not None:
+            self._rep_config.preferred_segments = preferred_segment.split(",")
 
         logger.info("MooncakeStoreConnector initialized successfully.")
 
